@@ -9,6 +9,8 @@ interface GoogleMapsRouteDrawerProps {
   onSelectRoute: (route: JourneyRoute) => void;
   isLiveTracking: boolean;
   onToggleLiveTracking: (active: boolean) => void;
+  onSaveJourney?: (route: JourneyRoute) => void;
+  isSavingJourney?: boolean;
 }
 
 export const GoogleMapsRouteDrawer: React.FC<GoogleMapsRouteDrawerProps> = ({
@@ -17,6 +19,8 @@ export const GoogleMapsRouteDrawer: React.FC<GoogleMapsRouteDrawerProps> = ({
   onSelectRoute,
   isLiveTracking,
   onToggleLiveTracking,
+  onSaveJourney,
+  isSavingJourney,
 }) => {
   if (routes.length === 0) return null;
 
@@ -152,21 +156,36 @@ export const GoogleMapsRouteDrawer: React.FC<GoogleMapsRouteDrawerProps> = ({
               </div>
 
               {/* Bottom selection confirmation bar */}
-              <div className="mt-3 pt-2 border-t border-slate-800/80 flex items-center justify-between text-[11px]">
+              <div className="mt-3 pt-2 border-t border-slate-800/80 flex items-center justify-between text-[11px] gap-2">
                 <span className="font-mono text-slate-300 text-[10px]">
                   {route.departureTime} → {route.arrivalTime}
                 </span>
-                <button
-                  type="button"
-                  className={`px-2 py-1 rounded-lg text-[10px] font-bold flex items-center gap-1 transition-all ${
-                    isSelected
-                      ? 'bg-cyan-500 text-white shadow-sm shadow-cyan-500/40'
-                      : 'bg-slate-900 hover:bg-slate-800 text-cyan-300 border border-slate-700'
-                  }`}
-                >
-                  <Eye className="w-3 h-3" />
-                  <span>{isSelected ? 'Showing' : 'Show on Map'}</span>
-                </button>
+                <div className="flex items-center gap-1.5">
+                  {onSaveJourney && (
+                    <button
+                      type="button"
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        onSaveJourney(route);
+                      }}
+                      className="px-2 py-1 rounded-lg text-[10px] font-semibold bg-cyan-950/40 hover:bg-cyan-900/60 text-cyan-300 border border-cyan-800/60 transition-all flex items-center gap-1"
+                      title="Save journey to your Firestore cloud vault"
+                    >
+                      <span>💾 Save</span>
+                    </button>
+                  )}
+                  <button
+                    type="button"
+                    className={`px-2 py-1 rounded-lg text-[10px] font-bold flex items-center gap-1 transition-all ${
+                      isSelected
+                        ? 'bg-cyan-500 text-white shadow-sm shadow-cyan-500/40'
+                        : 'bg-slate-900 hover:bg-slate-800 text-cyan-300 border border-slate-700'
+                    }`}
+                  >
+                    <Eye className="w-3 h-3" />
+                    <span>{isSelected ? 'Showing' : 'Show'}</span>
+                  </button>
+                </div>
               </div>
             </div>
           );

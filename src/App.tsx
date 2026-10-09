@@ -17,7 +17,20 @@ import { JourneyRoute, RoutePreference, WeatherCondition, DisruptionAlert, AuraS
 import { INITIAL_DISRUPTIONS, INITIAL_WEATHER, TRANSIT_NODES, INDIAN_CITIES_CONFIG } from './data/transitNetwork';
 import { planRoutes, rerouteAfterDisruption } from './services/routingEngine';
 import { sound } from './services/soundService';
-import { Navigation, MapPin, ArrowLeftRight, Sparkles, CloudRain, Sun, Shield, Layers, Zap, LocateFixed, Loader2, X, Flag } from 'lucide-react';
+import { Navigation, MapPin, ArrowLeftRight, Sparkles, CloudRain, Sun, Shield, Layers, Zap, LocateFixed, Loader2, X, Flag, BookmarkCheck } from 'lucide-react';
+import { onAuthStateChanged, User } from 'firebase/auth';
+import { auth } from './services/firebase';
+import { 
+  UserProfile, 
+  SavedJourneyRecord, 
+  RecentSearchRecord, 
+  syncUserProfile, 
+  saveJourneyToCloud, 
+  fetchUserSavedJourneys, 
+  fetchRecentSearches, 
+  recordRecentSearch 
+} from './services/userService';
+import { AuthProfileModal } from './components/AuthProfileModal';
 
 export default function App() {
   const [activeSection, setActiveSection] = useState('planner');
@@ -63,6 +76,14 @@ export default function App() {
   const [isSoundOpen, setIsSoundOpen] = useState(false);
   const [isMuted, setIsMuted] = useState(true);
 
+  // Authentication & Database State (Firebase)
+  const [currentUser, setCurrentUser] = useState<User | null>(null);
+  const [userProfile, setUserProfile] = useState<UserProfile | null>(null);
+  const [isAuthModalOpen, setIsAuthModalOpen] = useState(false);
+  const [savedJourneys, setSavedJourneys] = useState<SavedJourneyRecord[]>([]);
+  const [recentSearches, setRecentSearches] = useState<RecentSearchRecord[]>([]);
+  const [saveSuccessMsg, setSaveSuccessMsg] = useState<string | null>(null);
+
   // Demo Sequence Step
   const [demoStep, setDemoStep] = useState(1);
 
@@ -100,6 +121,84 @@ export default function App() {
   useEffect(() => {
     computeRoutes(originNode, destNode);
   }, [originId, destinationId, preference, maxBudget, maxWalkDistance, isNightTravel, weather, customOrigin, customDest]);
+
+  // Auth state listener and database synchronization
+  useEffect(() => {
+    const unsubscribe = onAuthStateChanged(auth, async (user) => {
+      setCurrentUser(user);
+      if (user) {
+        try {
+          const profile = await syncUserProfile(user);
+          setUserProfile(profile);
+          const [saved, history] = await Promise.all([
+            fetchUserSavedJourneys(user.uid),
+            fetchRecentSearches(user.uid),
+          ]);
+          setSavedJourneys(saved);
+          setRecentSearches(history);
+        } catch (err) {
+          console.error('Error fetching user cloud data:', err);
+        }
+      } else {
+        setUserProfile(null);
+        setSavedJourneys([]);
+        setRecentSearches([]);
+      }
+    });
+
+    return () => unsubscribe();
+  }, []);
+
+  const refreshUserData = async () => {
+    if (currentUser) {
+      try {
+        const [saved, history] = await Promise.all([
+          fetchUserSavedJourneys(currentUser.uid),
+          fetchRecentSearches(currentUser.uid),
+        ]);
+        setSavedJourneys(saved);
+        setRecentSearches(history);
+      } catch (err) {
+        console.error('Failed to refresh data:', err);
+      }
+    }
+  };
+
+  // Record searches in Cloud Firestore
+  const handlePerformSearch = (orig = originNode, dest = destNode) => {
+    computeRoutes(orig, dest);
+    if (currentUser) {
+      recordRecentSearch(currentUser.uid, {
+        originName: orig.name,
+        destName: dest.name,
+        originId: orig.id,
+        destId: dest.id,
+        originLat: orig.lat,
+        originLng: orig.lng,
+        destLat: dest.lat,
+        destLng: dest.lng,
+      }).then(() => refreshUserData());
+    }
+  };
+
+  // Handle saving journey to Cloud Firestore
+  const handleSaveJourney = async (routeToSave: JourneyRoute) => {
+    if (!currentUser) {
+      setIsAuthModalOpen(true);
+      return;
+    }
+    try {
+      await saveJourneyToCloud(currentUser.uid, routeToSave, originNode, destNode);
+      sound.playArrivalChime();
+      setSaveSuccessMsg(`Journey "${routeToSave.title}" saved to your Cloud Vault!`);
+      refreshUserData();
+      setTimeout(() => setSaveSuccessMsg(null), 4000);
+    } catch (err: any) {
+      console.error('Error saving journey:', err);
+      setSaveSuccessMsg('Could not save journey: ' + (err?.message || 'Check connection'));
+      setTimeout(() => setSaveSuccessMsg(null), 4000);
+    }
+  };
 
   // Handle device GPS current location
   const handleUseCurrentLocation = () => {
@@ -335,6 +434,8 @@ export default function App() {
         onOpenSOS={() => setIsSOSOpen(true)}
         onOpenShare={() => setIsShareOpen(true)}
         onOpenSoundSettings={() => setIsSoundOpen(true)}
+        onOpenAuth={() => setIsAuthModalOpen(true)}
+        currentUser={currentUser}
         isMuted={isMuted}
         onMuteToggle={(val) => {
           setIsMuted(val);
@@ -614,7 +715,7 @@ export default function App() {
             <button
               onClick={() => {
                 sound.playRouteSweep();
-                computeRoutes(originNode, destNode);
+                handlePerformSearch(originNode, destNode);
               }}
               disabled={isLoading}
               className="px-5 py-3 bg-gradient-to-r from-cyan-500 to-blue-600 hover:from-cyan-400 hover:to-blue-500 text-white text-xs font-bold rounded-xl shadow-lg shadow-cyan-500/25 flex items-center justify-center gap-1.5 transition-all"
@@ -624,6 +725,21 @@ export default function App() {
             </button>
           </div>
         </div>
+
+        {saveSuccessMsg && (
+          <div className="p-3 bg-cyan-950/80 border border-cyan-400/50 rounded-xl text-xs font-semibold text-cyan-200 flex items-center justify-between shadow-lg animate-fadeIn">
+            <span className="flex items-center gap-2">
+              <BookmarkCheck className="w-4 h-4 text-cyan-300" />
+              {saveSuccessMsg}
+            </span>
+            <button
+              onClick={() => setSaveSuccessMsg(null)}
+              className="text-slate-400 hover:text-white p-1"
+            >
+              <X className="w-4 h-4" />
+            </button>
+          </div>
+        )}
 
         {/* PRIMARY MAP CONTAINER (GOOGLE MAPS STYLE & 3D TOGGLE) */}
         <div className="w-full relative">
@@ -669,6 +785,7 @@ export default function App() {
           }}
           isLiveTracking={isLiveTracking}
           onToggleLiveTracking={setIsLiveTracking}
+          onSaveJourney={handleSaveJourney}
         />
 
         {/* Chronological Transit Timeline & Recovery */}
@@ -776,6 +893,29 @@ export default function App() {
         onMuteToggle={(val) => {
           setIsMuted(val);
           sound.setMuted(val);
+        }}
+      />
+
+      {/* Cloud Profile & Firestore Saved Journeys Modal */}
+      <AuthProfileModal
+        isOpen={isAuthModalOpen}
+        onClose={() => setIsAuthModalOpen(false)}
+        currentUser={currentUser}
+        userProfile={userProfile}
+        savedJourneys={savedJourneys}
+        recentSearches={recentSearches}
+        onRefreshData={refreshUserData}
+        onSelectSavedJourney={(saved) => {
+          const matchingOrigin = TRANSIT_NODES.find((n) => n.name === saved.originName);
+          const matchingDest = TRANSIT_NODES.find((n) => n.name === saved.destinationName);
+          if (matchingOrigin) setOriginId(matchingOrigin.id);
+          if (matchingDest) setDestinationId(matchingDest.id);
+          sound.playRouteSweep();
+        }}
+        onSelectRecentSearch={(search) => {
+          if (search.originId) setOriginId(search.originId);
+          if (search.destId) setDestinationId(search.destId);
+          sound.playRouteSweep();
         }}
       />
 
