@@ -1,0 +1,6 @@
+{
+  "name": "WAYORA — Immersive Mobility Universe",
+  "description": "Futuristic multi-modal journey planning, 3D spatial mobility universe, real-time rerouting, Aura AI contextual companion, tactile sound synthesis, and environmental intelligence.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}
